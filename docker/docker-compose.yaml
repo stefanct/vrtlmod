@@ -1,0 +1,13 @@
+services:
+  vrtlmod:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+          vrtlmod_gitdir: "${vrtlmod_gitdir}"
+    environment:
+      vrtlmod_gitdir: "${vrtlmod_gitdir}"
+    volumes:
+      - type: bind
+        source: ..
+        target: "${vrtlmod_gitdir}"

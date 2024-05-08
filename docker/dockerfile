@@ -1,0 +1,106 @@
+FROM debian:stable
+
+# Prerequisite packages
+RUN \
+  apt-get update \
+    && \
+    apt-get install --no-install-recommends -y \
+      autoconf \
+      bison \
+      cmake \
+      curl \
+      flex \
+      g++ \
+      git \
+      libboost-filesystem-dev \
+      libfl-dev \
+      make \
+      python3 \
+      python3-virtualenv \
+      wget \
+      xz-utils \
+    && \
+    rm -rf /var/lib/apt/lists/*
+
+########
+# LLVM #
+########
+ARG llvm="src"
+ARG llvm_prefix="llvm-project"
+ARG llvm_version="13.0.1"
+ARG llvm_postfix="."
+ARG llvm_ext="tar.xz"
+
+ARG llvm_name="${llvm_prefix}-${llvm_version}${llvm_postfix}${llvm}"
+ARG llvm_url="https://github.com/llvm/llvm-project/releases/download/llvmorg-${llvm_version}"
+
+ARG llvm_builddir="$HOME/build_llvm"
+ARG llvm_destdir="$HOME/llvm"
+
+RUN \
+  wget -nv  "${llvm_url}/${llvm_name}.${llvm_ext}" \
+    && \
+    tar xf "${llvm_name}.${llvm_ext}" \
+    && \
+    cmake \
+      -S "${llvm_name}/llvm" \
+      -B "${llvm_builddir}" \
+      -D "CMAKE_BUILD_TYPE=Release" \
+      -D "LLVM_ENABLE_PROJECTS=clang;clang-tools-extra" \
+      -D "CMAKE_INSTALL_PREFIX=${llvm_destdir}" \
+    && \
+    cmake --build "${llvm_builddir}" --parallel "$(nproc)" --target install \
+    && \
+    "${llvm_destdir}/bin/clang" --version \
+    && \
+    rm -rf "${llvm_name}.${llvm_ext}" "${llvm_name}" "${llvm_builddir}"
+
+#############
+# Verilator #
+#############
+ARG verilator_tag="v4.228"
+ARG verilator_url="https://github.com/verilator/verilator.git"
+ARG verilator_builddir="verilator-src"
+ARG verilator_destdir="$HOME/verilator"
+
+RUN \
+  git clone "${verilator_url}" "${verilator_builddir}" \
+  && cd "${verilator_builddir}" \
+  && git checkout "${verilator_tag}" \
+  && autoconf \
+  && ./configure --prefix "${verilator_destdir}" \
+  && make -j $(nproc) \
+  && make install \
+  && rm -rf "${verilator_builddir}" \
+  && "${verilator_destdir}/bin/verilator" --version
+
+###########
+# vrtlmod #
+###########
+ARG vrtlmod_venvdir="/.venv_vrtlmod"
+ARG vrtlmod_gitdir="/vrtlmod_git"
+ARG vrtlmod_builddir="vrtlmod_build"
+
+ENV LLVM_DIR="${llvm_destdir}"
+ENV VERILATOR_ROOT="${verilator_destdir}"
+
+RUN \
+  python3 -m virtualenv "${vrtlmod_venvdir}" \
+  && \
+  . "${vrtlmod_venvdir}/bin/activate" \
+  && \
+  pip install --upgrade pip \
+  && \
+  pip install --force-reinstall "conan==1.59.0" \
+  && \
+  rm -rf /root/.cache/pip/
+
+RUN mkdir -p ${vrtlmod_gitdir}
+
+RUN \
+  --mount=type=bind,source=.,target=${vrtlmod_gitdir} \
+  . "${vrtlmod_venvdir}/bin/activate" \
+  && \
+  cmake -S "${vrtlmod_gitdir}" -B "${vrtlmod_builddir}" -D BUILD_TESTING=On \
+  && \
+  cmake --build "${vrtlmod_builddir}" --parallel "$(nproc)"
